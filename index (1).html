@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0d0d11">
+<title>Aviator en vivo</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@600;700&family=IBM+Plex+Sans:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#0d0d11;--card:#15151c;--line:#26262f;--txt:#e9e9ee;--mut:#8b8b9c;--azul:#38bdf8;--mor:#a78bfa;--rosa:#ff5fe3;--ok:#22e07a;--ko:#ff4d6d;--oro:#ffd23f}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--txt);font:15px/1.45 "IBM Plex Sans",system-ui,sans-serif}
+.wrap{max-width:1300px;margin:0 auto;padding:14px 16px 28px}
+header{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:10px}
+h1{margin:0;font:700 1.35rem "Chakra Petch",sans-serif;letter-spacing:.02em}h1 b{color:#e50539}
+.pill{font:700 .78rem "IBM Plex Sans",sans-serif;padding:5px 12px;border-radius:999px;border:1px solid}
+#estado{margin-left:auto;color:#7dd3fc;border-color:rgba(14,165,233,.45);background:rgba(14,165,233,.1)}
+#estado.viejo{color:#fbbf24;border-color:rgba(251,191,36,.45);background:rgba(251,191,36,.08)}
+.tira{display:flex;gap:6px;overflow-x:auto;padding:4px 0 10px;scrollbar-width:none}.tira::-webkit-scrollbar{display:none}
+.tira span{flex:0 0 auto;font:700 .85rem "Chakra Petch",sans-serif;padding:4px 10px;border-radius:999px;background:#17171f;border:1px solid #23232c}
+.a{color:var(--azul)}.m{color:var(--mor)}.r{color:var(--rosa)}
+.ctl{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:10px}
+.ctl button{font:700 .85rem "IBM Plex Sans",sans-serif;padding:7px 14px;border-radius:10px;border:1px solid var(--line);background:var(--card);color:var(--txt);cursor:pointer}
+.ctl button.on{background:#e50539;border-color:#e50539}
+.ctl small{color:var(--mut);margin-left:auto}
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;overflow:hidden;position:relative}
+canvas{display:block;width:100%;height:clamp(340px,62vh,640px);touch-action:pan-y}
+#rayo{display:none;margin:10px 0;padding:12px 16px;border-radius:14px;font-weight:700;text-align:center}
+#rayo.p{display:block;background:var(--oro);color:#111}#rayo.w{display:block;background:#0f2a1d;color:#4ade80;border:1px solid var(--ok)}#rayo.l{display:block;background:#2a0f17;color:#ff8a8a;border:1px solid var(--ko)}
+#rayo small{display:block;font-weight:600;opacity:.85;font-size:.8rem}
+.ley{display:flex;gap:14px;flex-wrap:wrap;color:var(--mut);font-size:.8rem;margin-top:10px}.ley i{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:5px;vertical-align:-1px}
+.nota{color:#6f6f80;font-size:.76rem;margin-top:12px;line-height:1.5}
+#vacio{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--mut);text-align:center;padding:20px}
+@media(max-width:600px){h1{font-size:1.1rem}#estado{margin-left:0}.ctl small{flex-basis:100%;margin-left:0}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header><h1>✈ Aviator <b>en vivo</b></h1><span class="pill" id="estado">Cargando…</span></header>
+  <div class="tira" id="tira"></div>
+  <div class="ctl"><button data-n="30">30</button><button data-n="50" class="on">50</button><button data-n="100">100</button><button data-n="200">200</button><small id="info"></small></div>
+  <div id="rayo"></div>
+  <div class="card"><canvas id="cv"></canvas><div id="vacio">Esperando datos en vivo…</div></div>
+  <div class="ley"><span><i style="background:#fff"></i>Línea: sube con 2x o más, baja con menos de 2x</span><span><i style="background:#1fd6a0"></i>Media 5</span><span><i style="background:var(--azul)"></i>menos de 2x</span><span><i style="background:var(--mor)"></i>2x a 10x</span><span><i style="background:var(--rosa)"></i>10x o más</span><span><i style="background:var(--oro)"></i>⚡ entrada de un rayo</span></div>
+  <p class="nota">Vista de solo lectura. Se actualiza sola en vivo. Cada ronda de Aviator es independiente: lo que se ve aquí es un registro, no una garantía de lo que va a salir.</p>
+</div>
+<script>
+(function () {
+  const $ = id => document.getElementById(id), qs = new URLSearchParams(location.search);
+  let owner = location.hostname.split('.')[0], repo = location.pathname.split('/').filter(Boolean)[0] || '';
+  if (qs.get('repo')) [owner, repo] = qs.get('repo').split('/');
+  let D = null, NP = 50, hover = -1, usarRaw = 0;
+  const col = v => v >= 10 ? '#ff5fe3' : v >= 2 ? '#a78bfa' : '#38bdf8', cls = v => v >= 10 ? 'r' : v >= 2 ? 'm' : 'a';
+  async function cargar() {
+    let d = null;
+    try {
+      if (qs.get('demo') != null || window.__DEMO) d = window.__DEMO;
+      else if (Date.now() > usarRaw) { const r = await fetch(`https://api.github.com/repos/${owner}/${repo}/contents/datos.json?ref=datos`, { headers: { Accept: 'application/vnd.github.raw+json' }, cache: 'no-store' }); if (r.status === 403 || r.status === 429) usarRaw = Date.now() + 15 * 60e3; else if (r.ok) d = await r.json(); }
+      if (!d && Date.now() <= usarRaw) { const r = await fetch(`https://raw.githubusercontent.com/${owner}/${repo}/datos/datos.json?t=${Date.now()}`, { cache: 'no-store' }); if (r.ok) d = await r.json(); }
+    } catch (e) {}
+    if (d && d.fb && !fbOn) vivo(d.fb);
+    if (d && Array.isArray(d.v) && d.v.length && !(D && D.n >= d.n)) { D = d; $('vacio').style.display = 'none'; pintarTodo(); }
+    else if (!D) $('vacio').textContent = 'Todavía no hay datos en vivo. Vuelve a intentar en un minuto.';
+    estado();
+  }
+  /* al segundo: Firebase manda cada ronda en cuanto la publica tu extensión */
+  let fbOn = false, fbT = 0;
+  function vivo(fb) { if (fbOn || !/^https:\/\/[\w.-]+\.(firebaseio\.com|firebasedatabase\.app)$/.test(fb)) return; fbOn = true;
+    const es = new EventSource(fb + '/aviator/vivo.json');
+    const toma = ev => { try { const m = JSON.parse(ev.data); if (!m || m.path !== '/' || !m.data || !Array.isArray(m.data.v) || !m.data.v.length) return; D = m.data; fbT = Date.now(); $('vacio').style.display = 'none'; pintarTodo(); estado(); } catch (e) {} };
+    es.addEventListener('put', toma); es.addEventListener('patch', toma);
+    es.onerror = () => { if (es.readyState === 2) { fbOn = false; setTimeout(() => vivo(fb), 5000); } }; }
+  vivo((qs.get('fb') || 'https://aviator-en-vivo-default-rtdb.firebaseio.com').replace(/\/$/, ''));
+  function estado() { const e = $('estado'); if (!D) { e.textContent = 'Sin datos todavía'; return; } const m = Math.round((Date.now() - D.t) / 60000);
+    e.classList.toggle('viejo', m > 5); e.textContent = fbOn && m <= 2 ? '⚡ En vivo al segundo · ronda #' + D.n : m <= 1 ? '● En vivo · ronda #' + D.n : `Última actualización hace ${m} min · ronda #${D.n}`; }
+  function pintarTodo() {
+    const v = D.v; $('tira').innerHTML = v.slice(-30).reverse().map(x => `<span class="${cls(x)}">${x.toFixed(2)}x</span>`).join('');
+    $('info').textContent = `${v.length} rondas · rayos marcados: ${(D.e || []).length}`;
+    const N = v.length, E = new Map((D.e || []).map(z => [z[0], z])), ult = E.get(N - 1), prev = E.get(N - 2), R = $('rayo');
+    if (ult) { R.className = 'p'; R.innerHTML = `⚡ Rayo: entrada en la próxima ronda · retiro ${ult[2]}x<small>${ult[3] || ''} · aviso en la ronda #${D.n} (${v[N - 1].toFixed(2)}x)</small>`; }
+    else if (prev) { const ok = v[N - 1] >= prev[2]; R.className = ok ? 'w' : 'l'; R.innerHTML = `${ok ? '✓ El último rayo acertó' : '✗ El último rayo falló'}: salió ${v[N - 1].toFixed(2)}x (retiro ${prev[2]}x)<small>${prev[3] || ''}</small>`; }
+    else R.className = '';
+    dibujar(); }
+  function dibujar() {
+    const cv = $('cv'); if (!D) return; const W = cv.clientWidth, H = cv.clientHeight, dpr = window.devicePixelRatio || 1;
+    if (cv.width !== Math.round(W * dpr) || cv.height !== Math.round(H * dpr)) { cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr); }
+    const c = cv.getContext('2d'); c.setTransform(dpr, 0, 0, dpr, 0, 0); c.clearRect(0, 0, W, H);
+    const v = D.v, N = v.length, Wk = []; let w = 0; v.forEach(x => { w += x >= 2 ? 1 : -1; Wk.push(w); });
+    const E5 = []; Wk.forEach((x, i) => E5.push(i ? x * (2 / 6) + E5[i - 1] * (4 / 6) : x));
+    const np = Math.min(W < 520 ? Math.min(NP, 30) : NP, N), a = N - np, idx = []; for (let i = a; i < N; i++) idx.push(i);
+    const PL = 12, PR = 64, TOP = 30, BOT = 34, h = H - TOP - BOT, ser = idx.flatMap(i => [Wk[i], E5[i]]), mn = Math.min(...ser) - 1.5, mx = Math.max(...ser) + 1.5;
+    const step = (W - PL - PR) / (np + 1), X = k => PL + step * (k + .5), Y = y => TOP + h * (1 - (y - mn) / (mx - mn));
+    const bg = c.createLinearGradient(0, 0, 0, H); bg.addColorStop(0, '#16161e'); bg.addColorStop(1, '#0e0e13'); c.fillStyle = bg; c.fillRect(0, 0, W, H);
+    c.font = '11px IBM Plex Sans, sans-serif'; const st = mx - mn > 26 ? 2 : 1;
+    for (let y = Math.ceil(mn / st) * st; y <= mx; y += st) { const yy = Y(y), f = y % 5 === 0; c.strokeStyle = f ? 'rgba(255,255,255,.12)' : 'rgba(255,255,255,.04)'; c.beginPath(); c.moveTo(PL, yy); c.lineTo(W - PR, yy); c.stroke(); if (f) { c.fillStyle = '#8b8b9c'; c.fillText(y, W - PR + 10, yy + 4); } }
+    idx.forEach((i, k) => { if ((i + 1) % (np > 60 || step < 22 ? 10 : 5)) return; c.fillStyle = '#4c4c5a'; c.font = '10px IBM Plex Sans, sans-serif'; c.textAlign = 'center'; c.fillText('#' + (D.n - N + i + 1), X(k), H - 12); c.textAlign = 'left'; });
+    // entradas de rayos
+    const Em = new Map((D.e || []).map(z => [z[0], z])), bw = Math.max(12, step * .9);
+    idx.forEach((i, k) => { const z = Em.get(i); if (!z) return; const xb = X(k + 1), res = i + 1 < N ? v[i + 1] : null, pend = res == null, ok = res != null && res >= z[2], cl = pend ? '#ffd23f' : ok ? '#22e07a' : '#ff4d6d';
+      c.save(); c.globalAlpha = pend ? .28 : .13; c.fillStyle = cl; c.fillRect(xb - bw / 2, TOP - 6, bw, h + 12); c.restore();
+      c.strokeStyle = cl; c.lineWidth = pend ? 2.5 : 1.3; c.setLineDash(pend ? [] : [4, 3]); c.beginPath(); c.moveTo(xb, TOP + 14); c.lineTo(xb, TOP + h); c.stroke(); c.setLineDash([]);
+      c.font = '900 14px IBM Plex Sans, sans-serif'; c.textAlign = 'center'; c.fillStyle = '#ffd23f'; c.fillText('⚡', X(k), Y(Wk[i]) - 16);
+      const t = pend ? `⚡ ENTRA AQUÍ · ${z[2]}x` : step > 24 ? `${ok ? '✓' : '✗'} ${res.toFixed(2)}x` : (ok ? '✓' : '✗'); c.font = '800 10.5px IBM Plex Sans, sans-serif'; const tw = c.measureText(t).width + 12, tx = Math.max(PL + tw / 2, Math.min(W - 4 - tw / 2, xb));
+      c.fillStyle = pend ? '#ffd23f' : 'rgba(13,13,17,.94)'; c.strokeStyle = cl; c.beginPath(); c.roundRect ? c.roundRect(tx - tw / 2, TOP - 4, tw, 17, 8) : c.rect(tx - tw / 2, TOP - 4, tw, 17); c.fill(); c.stroke(); c.fillStyle = pend ? '#111' : cl; c.fillText(t, tx, TOP + 8.5); c.textAlign = 'left'; });
+    // media 5 y línea
+    const linea = (f, cl, lw) => { c.beginPath(); idx.forEach((i, k) => { const x = X(k), y = Y(f(i)); k ? c.lineTo(x, y) : c.moveTo(x, y); }); c.strokeStyle = cl; c.lineWidth = lw; c.stroke(); };
+    linea(i => E5[i], '#1fd6a0', 2);
+    const g = c.createLinearGradient(0, TOP, 0, TOP + h); g.addColorStop(0, 'rgba(255,255,255,.12)'); g.addColorStop(1, 'rgba(255,255,255,0)'); c.beginPath(); idx.forEach((i, k) => { const x = X(k), y = Y(Wk[i]); k ? c.lineTo(x, y) : c.moveTo(x, y); }); c.lineTo(X(np - 1), TOP + h); c.lineTo(X(0), TOP + h); c.closePath(); c.fillStyle = g; c.fill();
+    c.save(); c.shadowColor = 'rgba(255,255,255,.45)'; c.shadowBlur = 10; linea(i => Wk[i], '#fff', 2.6); c.restore();
+    // puntos y valores
+    const big = np <= 50 && step >= 24, fs = np > 75 || step < 24 ? 10.5 : 12;
+    idx.forEach((i, k) => { const x = X(k), y = Y(Wk[i]), val = v[i], last = i === N - 1, rad = last ? 7 : big ? 5 : 3.2;
+      if (val >= 10) { c.save(); c.shadowColor = '#ff40dc'; c.shadowBlur = 16; c.beginPath(); c.arc(x, y, rad + 2, 0, 7); c.fillStyle = '#ff5fe3'; c.fill(); c.restore(); }
+      else { c.beginPath(); c.arc(x, y, rad, 0, 7); c.fillStyle = col(val); c.fill(); c.lineWidth = 2; c.strokeStyle = '#0d0d11'; c.stroke(); }
+      if (last) { c.beginPath(); c.arc(x, y, 12, 0, 7); c.strokeStyle = 'rgba(255,255,255,.55)'; c.lineWidth = 2; c.stroke(); }
+      if (big ? (val >= 2 || k % 2 === 0 || last) : (val >= (np > 75 ? 5 : step < 24 ? 2 : 3) || last)) { const t = val.toFixed(2) + 'x'; c.font = `700 ${fs}px Chakra Petch, sans-serif`; const tw = c.measureText(t).width + 10, th = fs + 6, up = val >= 2, ly = up ? y - 13 - th / 2 : y + 13 + th / 2, lx = Math.min(W - PR - tw / 2, Math.max(PL + tw / 2, x));
+        c.fillStyle = 'rgba(10,10,14,.88)'; c.strokeStyle = up ? col(val) : 'rgba(255,255,255,.18)'; c.lineWidth = 1; c.beginPath(); c.roundRect ? c.roundRect(lx - tw / 2, ly - th / 2, tw, th, 6) : c.rect(lx - tw / 2, ly - th / 2, tw, th); c.fill(); c.stroke();
+        c.fillStyle = val >= 10 ? '#ff8bea' : up ? '#c9a6ff' : '#dfe3ea'; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText(t, lx, ly + .5); c.textAlign = 'left'; c.textBaseline = 'alphabetic'; } });
+    // cursor
+    if (hover >= 0 && hover < np) { const i = idx[hover], x = X(hover); c.strokeStyle = 'rgba(255,255,255,.25)'; c.setLineDash([3, 3]); c.beginPath(); c.moveTo(x, TOP); c.lineTo(x, TOP + h); c.stroke(); c.setLineDash([]);
+      const hr = D.h && D.h[i] ? new Date(D.h[i]).toLocaleTimeString('es-EC', { hour12: false }) : '', bwd = 120, bx = Math.min(W - PR - bwd - 4, Math.max(PL + 4, x + 10));
+      c.fillStyle = 'rgba(20,20,26,.95)'; c.strokeStyle = '#2c2c36'; c.beginPath(); c.roundRect ? c.roundRect(bx, TOP + 20, bwd, hr ? 58 : 42, 10) : c.rect(bx, TOP + 20, bwd, 58); c.fill(); c.stroke();
+      c.fillStyle = '#b9b9c6'; c.font = '600 11px IBM Plex Sans, sans-serif'; c.fillText('Ronda #' + (D.n - N + i + 1), bx + 10, TOP + 37); c.fillStyle = col(v[i]); c.font = '700 15px Chakra Petch, sans-serif'; c.fillText(v[i].toFixed(2) + 'x', bx + 10, TOP + 55); if (hr) { c.fillStyle = '#8b8b9c'; c.font = '11px IBM Plex Sans, sans-serif'; c.fillText(hr, bx + 10, TOP + 71); } }
+    window.__geo = { PL, step, np };
+  }
+  const cv = $('cv'), mv = e => { const g = window.__geo; if (!g) return; const r = cv.getBoundingClientRect(), x = (e.touches ? e.touches[0].clientX : e.clientX) - r.left, k = Math.floor((x - g.PL) / g.step); hover = k >= 0 && k < g.np ? k : -1; dibujar(); };
+  cv.addEventListener('mousemove', mv); cv.addEventListener('touchstart', mv, { passive: true }); cv.addEventListener('touchmove', mv, { passive: true }); cv.addEventListener('mouseleave', () => { hover = -1; dibujar(); });
+  document.querySelectorAll('.ctl button').forEach(b => b.onclick = () => { NP = +b.dataset.n; document.querySelectorAll('.ctl button').forEach(x => x.classList.toggle('on', x === b)); dibujar(); });
+  window.addEventListener('resize', dibujar);
+  cargar(); setInterval(() => { if (!fbOn || Date.now() - fbT > 180000) cargar(); }, 60000); setInterval(estado, 15000);
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') cargar(); });
+})();
+</script>
+</body>
+</html>
